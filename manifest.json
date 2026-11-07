@@ -1,0 +1,2 @@
+{"name": "算数オフライン", "short_name": "算数オフライン", "start_url": "./index.html", "scope": "./", "display": "standalone", "background_color": "#f4f7f5", "theme_color": "#1c6b78",
+ "icons": [{"src": "icon.png", "sizes": "180x180", "type": "image/png"}, {"src": "icon512.png", "sizes": "512x512", "type": "image/png"}]}
