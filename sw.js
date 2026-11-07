@@ -3,7 +3,7 @@
    - 問題のファイル（data_・keys・figs_・lecture_・easy_・lectimg_・ic/）は、iPad の中（IndexedDB）から返す。無いものは空のスクリプト
    SHELL と V は make_offline.py が書く */
 importScripts("offdb.js");
-var V = "sansu-off-ee434b1e32";
+var V = "sansu-off-93c7bd7266";
 var SHELL = ["./", "app.html", "dash.js", "figlib.js", "icon.png", "icon512.png", "imgman.js", "index.html", "jspdf.umd.min.js", "kais.js", "manifest.json", "model.js", "offbar.js", "offdb.js", "store.js", "today.js", "videos.js", "vizex.js"];
 var CONTENT = /^(?:(?:data_|keys|figs_|lecture_|easy_|lectimg_)[^\/]*\.js|ic\/[^\/]+\.js)$/;
 
@@ -11,7 +11,8 @@ self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(V).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
 });
 self.addEventListener("activate", function (e) {
-  e.waitUntil(caches.keys().then(function (ks) { return Promise.all(ks.filter(function (k) { return k !== V; }).map(function (k) { return caches.delete(k); })); })
+  // 消すのは自分の古い版だけ。cache は nambanamba.github.io のほかのアプリ（対戦・漢字・スペシャル計算）と共有（2026-11-08 スペシャル計算担当の相互チェック）
+  e.waitUntil(caches.keys().then(function (ks) { return Promise.all(ks.filter(function (k) { return k.indexOf("sansu-off-") === 0 && k !== V; }).map(function (k) { return caches.delete(k); })); })
     .then(function () { return self.clients.claim(); }));
 });
 self.addEventListener("fetch", function (e) {

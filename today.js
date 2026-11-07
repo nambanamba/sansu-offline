@@ -600,7 +600,9 @@ async function makeOffline() {
 }
 // オフラインでつけた記録を足す（足すだけ。消さない・上書きしない。同じ問題の同じ時刻の記録は2回入れない）
 let offRecs = null;   // 読み込んだ記録ファイル（足す前に親に見せる）
-function offRecCount(o) { let add = 0, ok = 0; for (const [k, m] of Object.entries(o.recs || {})) for (const [key, arr] of Object.entries(m)) { const have = new Set((recOf(+k)[key] || []).map(x => x.t)); arr.forEach(x => { if (!have.has(x.t)) { add++; if (x.ok) ok++; } }); } return {add, ok}; }
+// 同じ時刻 t で ◎× だけちがう記録は、機内での「その日の付け直し」なので置きかえる（2026-11-08 理科計算担当の相互チェック）
+const offNew = (have, x) => x && typeof x.t === "number" && !(have.has(x.t) && have.get(x.t) === !!x.ok);
+function offRecCount(o) { let add = 0, ok = 0; for (const [k, m] of Object.entries(o.recs || {})) for (const [key, arr] of Object.entries(m)) { const have = new Map((recOf(+k)[key] || []).map(x => [x.t, !!x.ok])); arr.forEach(x => { if (offNew(have, x)) { add++; if (x.ok) ok++; } }); } return {add, ok}; }
 async function offRecLoad(file) {
   try { const o = JSON.parse(await file.text()); if (!o || o.app !== "sansu-step" || o.kind !== "recs") throw new Error("算数オフラインの記録ファイルではありません");
     offRecs = o; const c = offRecCount(o); dayMsg = c.add ? "" : "足す記録はありませんでした（もう入っています）。"; if (!c.add) offRecs = null; }
@@ -608,17 +610,22 @@ async function offRecLoad(file) {
   renderToday();
 }
 async function offRecMerge() {
-  const o = offRecs; offRecs = null; let add = 0;
+  const o = offRecs; offRecs = null; let add = 0, ng = 0; dayBusy = true; dayMsg = "記録の控えを取っています…"; renderToday();
+  // 足す前に、全部の回の記録の控えを取る（backup/<日付>_機内の前_<時刻>）
+  const d0 = new Date(); try { await backupNow(todayKeyS() + "_機内の前_" + String(d0.getHours()).padStart(2, "0") + String(d0.getMinutes()).padStart(2, "0")); } catch (e) {}
   for (const [ks, m] of Object.entries(o.recs || {})) { const k = +ks; if (!KAI_LIST.includes(k)) continue; const R = recOf(k);
-    for (const [key, arr] of Object.entries(m)) { const before = R[key] || [], have = new Set(before.map(x => x.t)), extra = arr.filter(x => x && typeof x.t === "number" && !have.has(x.t));
-      if (!extra.length) continue; const after = before.concat(extra).sort((a, b) => a.t - b.t); add += extra.length;
+    for (const [key, arr] of Object.entries(m)) { const before = R[key] || [], have = new Map(before.map(x => [x.t, !!x.ok])), extra = arr.filter(x => offNew(have, x));
+      if (!extra.length) continue; const fixT = new Set(extra.filter(x => have.has(x.t)).map(x => x.t));
+      const after = before.filter(x => !fixT.has(x.t)).concat(extra).sort((a, b) => a.t - b.t);
+      // アプリ（db）に書けたものだけ手元にも入れる。書けなかったものは、もう一度読み込めば足せる
+      if (db) { try { await db.doc(recc(k) + "/" + key).set({tries: after}); } catch (e) { ng += extra.length; continue; } }
+      add += extra.length;
       if (window.logRecChange) logRecChange(k, key, before.length ? before : null, after, "オフラインの記録を足す");
       R[key] = after; if (k !== KAI_NO) RECS[k] = R;
-      try { localStorage.setItem(lsRec(k), JSON.stringify(R)); } catch (e) {}
-      if (db) { try { await db.doc(recc(k) + "/" + key).set({tries: after}); } catch (e) {} } } }
+      try { localStorage.setItem(lsRec(k), JSON.stringify(R)); } catch (e) {} } }
   for (const [date, marks] of Object.entries(o.rei2 || {})) { if (!marks || !Object.keys(marks).length) continue;
-    if (db) { try { const d = await db.doc("rei2rec/" + date).get(); const old = d.exists && d.data().marks || {}; await db.doc("rei2rec/" + date).set({marks: Object.assign({}, marks, old), t: Date.now()}); } catch (e) {} } }
-  dayMsg = `オフラインの記録を ${add} 件 足しました。`; render();
+    if (db) { try { const d = await db.doc("rei2rec/" + date).get(); const old = d.exists && d.data().marks || {}; await db.doc("rei2rec/" + date).set({marks: Object.assign({}, marks, old), t: Date.now()}); } catch (e) { ng++; } } }
+  dayBusy = false; dayMsg = `オフラインの記録を ${add} 件 足しました。` + (ng ? `${ng} 件はアプリに保存できませんでした。ネットを確かめて、同じファイルでもう一度「オフラインの記録を読み込む」をしてください（入った分は二重になりません）。` : ""); render();
 }
 function planSystems() {
   const cur = SETTINGS.cur, d = new Date(), wd = d.getDay(), holiday = wd === 0 || HOLIDAYS.has(todayKey());
@@ -1063,7 +1070,7 @@ function renderToday() {
       <label class="btn ghost">オフラインの記録を読み込む<input id="offrec" type="file" accept=".json,application/json" hidden></label></div>`;
     if (offPrev) h += `<div class="sheet" style="padding:10px;margin:6px 0">${offListHtml(offPrev.d1, "1日目")}${offListHtml(offPrev.d2, "2日目")}
       <div class="row"><button class="primary" id="offgo" ${dayBusy ? "disabled" : ""}>この2日分でファイルを作る</button><button class="ghost" id="offno">やめる</button></div></div>`;
-    if (offRecs) { const c = offRecCount(offRecs); h += `<div class="sheet" style="padding:10px;margin:6px 0"><p>オフラインの記録：足す記録 ${c.add} 件（◎${c.ok}・×${c.add - c.ok}）。今の記録は消しません。</p>
+    if (offRecs) { const c = offRecCount(offRecs); h += `<div class="sheet" style="padding:10px;margin:6px 0"><p>オフラインの記録：足す記録 ${c.add} 件（◎${c.ok}・×${c.add - c.ok}）。今の記録は消しません（機内でその日に付け直した分は、その日の結果を直します）。</p>
       <div class="row"><button class="primary" id="offadd">足す</button><button class="ghost" id="offaddno">やめる</button></div></div>`; }
     h += timesHtml(es);
     h += `<p class="note">図の説明: ${!sample ? "この画面では作れません" : prep ? (prep.running ? `準備中 ${prep.done}/${prep.total}` : `準備できました（${prep.total - prep.fail}/${prep.total}）${prep.fail ? `　<button class="ghost mini" id="prepv">足りない分を作る</button>` : ""}`) : `<button class="ghost mini" id="prepv">今日の分を準備する</button>`}</p>`;
