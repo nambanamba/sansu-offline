@@ -62,6 +62,8 @@ function newRecs() {
     } }
   return {out: out, n: n};
 }
+// 最後に書き出したときの記録の数（書き出したあとは「まだ書き出していない」に数えない）
+function unexported() { return Math.max(0, newRecs().n - +(localStorage.getItem("sansu-off-exported") || 0)); }
 function curDay() { return +(localStorage.getItem("sansu-off-day") || 0); }
 function start(i) {
   if (curDay() !== i || !localStorage.getItem("sansu-step-dayAll")) {
@@ -70,7 +72,7 @@ function start(i) {
 }
 function show() {
   if (!pack) { $("#st").innerHTML = '<b>まだファイルが入っていません。</b><br><span class="note">下の「ファイルを選ぶ」で読み込んでね。</span>'; return; }
-  var c = newRecs().n;
+  var c = unexported();
   $("#st").innerHTML = "<b>入っている問題</b><br>" + pack.days.map(function (d, i) {
       return '<button class="' + (i === curDay() ? "primary" : "") + '" data-d="' + i + '">' + (i + 1) + "日目（" + md(d.date) + "・" + d.items.length + "問）を始める</button>"; }).join("") +
     '<p class="note">いま選んでいるのは ' + (curDay() + 1) + " 日目。ファイルを作った日: " + new Date(pack.created).toLocaleString("ja-JP") + "<br>まだ書き出していない記録: " + c + " 件</p>";
@@ -81,14 +83,16 @@ $("#file").onchange = async function (e) {
   try {
     var o = JSON.parse(await f.text());
     if (!o || o.app !== "sansu-step" || o.kind !== "offline" || !Array.isArray(o.days) || !o.files || !o.ls) throw new Error("算数のオフライン用ファイルではありません");
-    var c = pack ? newRecs().n : 0;
+    var same = pack && pack.created === o.created, c = pack && !same ? unexported() : 0;
     if (c && !confirm("まだ書き出していない記録が " + c + " 件あります。読み込むと、この iPad の記録は新しいファイルの中身にかわります。先に「記録を書き出す」をしましたか？\n\nOK＝読み込む／キャンセル＝やめる")) { $("#fmsg").textContent = "やめました。"; return; }
     var meta = {created: o.created, days: o.days, ls: o.ls};
     await OFFDB.putAll(o.files, meta);
-    Object.keys(o.ls).forEach(function (k) { localStorage.setItem(k, o.ls[k]); });
-    localStorage.setItem("sansu-step-dayAll", JSON.stringify(o.days[0])); localStorage.setItem("sansu-off-day", "0");
+    if (!same) {
+      Object.keys(o.ls).forEach(function (k) { localStorage.setItem(k, o.ls[k]); });
+      for (var i = localStorage.length - 1; i >= 0; i--) { var lk = localStorage.key(i); if (/^sansu-step-rei2-/.test(lk)) localStorage.removeItem(lk); }
+      localStorage.setItem("sansu-step-dayAll", JSON.stringify(o.days[0])); localStorage.setItem("sansu-off-day", "0"); localStorage.setItem("sansu-off-exported", "0"); }
     try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e2) {}
-    pack = meta; $("#fmsg").textContent = "読み込みました（ファイル " + Object.keys(o.files).length + " 個）。上のボタンで始めてね。"; show();
+    pack = meta; $("#fmsg").textContent = (same ? "同じファイルです（記録はそのまま）。" : "読み込みました（ファイル " + Object.keys(o.files).length + " 個）。") + "上のボタンで始めてね。"; show();
   } catch (err) { $("#fmsg").textContent = "読み込めませんでした: " + ((err && err.message) || err) + "（前の中身はそのままです）"; }
   e.target.value = "";
 };
@@ -99,8 +103,10 @@ $("#exp").onclick = async function () {
   var blob = new Blob([js], {type: "application/json"});
   try {
     var file = new File([blob], name, {type: "application/json"});
-    if (navigator.canShare && navigator.canShare({files: [file]})) { await navigator.share({files: [file], title: name}); }
-    else { var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+    // share が使えないときは文字で写す（ホーム画面の画面で blob を開くと、もどれなくなるおそれがあるため a.click() は使わない）
+    if (!(navigator.canShare && navigator.canShare({files: [file]}))) { $("#etxt").closest("details").open = true; $("#etxt").select(); $("#emsg").textContent = "この画面ではファイルで保存できません。下の文字を全部コピーして、送ってね。"; return; }
+    await navigator.share({files: [file], title: name});
+    localStorage.setItem("sansu-off-exported", String(r.n)); show();
     $("#emsg").textContent = "記録 " + r.n + " 件を書き出しました。「ファイルに保存」を選んでね。";
   } catch (err) { $("#emsg").textContent = (err && err.name === "AbortError") ? "やめました。" : "保存できませんでした。下の「文字で写す」を使ってね。"; }
 };
