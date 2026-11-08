@@ -3,7 +3,7 @@
    - 問題のファイル（data_・keys・figs_・lecture_・easy_・lectimg_・ic/）は、iPad の中（IndexedDB）から返す。無いものは空のスクリプト
    SHELL と V は make_offline.py が書く */
 importScripts("offdb.js");
-var V = "sansu-off-93c7bd7266";
+var V = "sansu-off-6ab8f87f50";
 var SHELL = ["./", "app.html", "dash.js", "figlib.js", "icon.png", "icon512.png", "imgman.js", "index.html", "jspdf.umd.min.js", "kais.js", "manifest.json", "model.js", "offbar.js", "offdb.js", "store.js", "today.js", "videos.js", "vizex.js"];
 var CONTENT = /^(?:(?:data_|keys|figs_|lecture_|easy_|lectimg_)[^\/]*\.js|ic\/[^\/]+\.js)$/;
 

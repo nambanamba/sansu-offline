@@ -560,16 +560,13 @@ async function makeKinai() {
   await makePdf({entries: entriesOf(items), name: `算数プリント_機内用_${todayKey()}.pdf`, msg: "機内用の1日分を保存しました。印刷して持っていこう。"});
 }
 // ★オフライン用ファイル（2026-11-08 ユーザー「オフラインファイルを作成するを押すと作られる」「ファイルは2日で」）
-//  1日目＝今日のプリント、2日目＝機内用と同じ作り（1日目の系統・一行問題と重ならない）。問題のデータ・絵・今の記録を1つの JSON に入れる
+//  今日のプリントの1日分（11-08 ユーザー「1日分でいいです。ダウンロードが長過ぎる」で2日→1日）。問題のデータ・絵・今の記録を1つの JSON に入れる
 //  入れ物ページ（GitHub Pages の sansu-offline。問題は入っていない）に読み込むと、ネットなしで同じ画面が使える。設計: 回答_オフラインで使う仕組み_2026-11-08.md
-let offPrev = null;   // {d1, d2}（作る前に親に見せる2日分）
+let offPrev = null;   // {d1}（作る前に親に見せる1日分）
 const offItem = e => Object.assign({k: e.k, id: e.id, subs: e.subs}, typeof e.ord === "number" ? {ord: e.ord} : {}, typeof e.set === "number" ? {set: e.set} : {}, e.rev ? {rev: e.rev} : {}, e.how ? {how: e.how} : {}, e.sys ? {sys: e.sys} : {}, e.han ? {han: true} : {}, e.sno ? {sno: e.sno} : {});
-const nextDate = s => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + 1); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 function offPreview() {
   if (!day || !day.items.length) { dayMsg = "先に今日のプリントを作ってね（それが1日目になります）。"; return renderToday(); }
-  KINAI_AVOID = new Set(day.items.filter(e => e.sys).map(e => e.k + ":" + e.sys)); KINAI_AVOID_Q = new Set(day.items.filter(e => e.how === "ichigyo").map(e => e.k + ":" + e.id));
-  let items; try { items = sortList(planDay()); } finally { KINAI_AVOID = new Set(); KINAI_AVOID_Q = new Set(); }
-  offPrev = {d1: {date: day.date, created: day.created || Date.now(), items: day.items.map(offItem)}, d2: {date: nextDate(day.date), created: Date.now(), items: sortList(items.map(offItem))}};
+  offPrev = {d1: {date: day.date, created: day.created || Date.now(), items: day.items.map(offItem)}};
   renderToday();
 }
 function offListHtml(d, label) {
@@ -578,22 +575,22 @@ function offListHtml(d, label) {
 }
 async function makeOffline() {
   await capReady; if (!downloads) { dayMsg = "この画面では保存できません。ブラウザで claude.ai を開いてね。"; return renderToday(); }
-  const {d1, d2} = offPrev; dayBusy = true; dayMsg = "オフライン用ファイルを作っています…"; renderToday();
+  const {d1} = offPrev; dayBusy = true; dayMsg = "オフライン用ファイルを作っています…"; renderToday();
   try {
     const files = {}, base = u => u.split("?")[0].replace(/^\/?_blob\//, "");
     const want = /(^|\/)(data_|keys|figs_|lecture_)[^\/]*\.js$/;
     const urls = [...document.scripts].map(s => s.getAttribute("src") || "").filter(u => want.test(base(u)));
     (window.HEAVY || []).forEach(u => urls.push(furl(u)));
-    // 絵の束: 2日分の問題（と答えの絵）が入っている束だけ
-    const man = window.IMGMAN || {f: [], m: {}}, need = new Set(), ids = new Set([...d1.items, ...d2.items].map(e => e.k + "/" + e.id));
+    // 絵の束: その日の問題（と答えの絵）が入っている束だけ
+    const man = window.IMGMAN || {f: [], m: {}}, need = new Set(), ids = new Set(d1.items.map(e => e.k + "/" + e.id));
     for (const [kk, i] of Object.entries(man.m)) if (ids.has(kk.replace(/\/a_(.*)_\d+$/, "/$1"))) need.add(i);
     need.forEach(i => urls.push(furl(man.f[i])));
     let n = 0;
     for (const u of urls) { const r = await fetch(u); if (!r.ok) throw new Error("読めないファイル: " + base(u)); files[base(u)] = await r.text(); if (++n % 5 === 0) { dayMsg = `オフライン用ファイルを作っています…（${n}/${urls.length}）`; renderToday(); } }
     const ls = {"sansu-step-kai": String(KAI_NO), "sansu-step-skip": JSON.stringify([...SKIP]), "sansu-step-settings": JSON.stringify(SETTINGS)};
     KAI_LIST.forEach(k => { ls[lsRec(k)] = JSON.stringify(recOf(k)); });
-    const js = JSON.stringify({app: "sansu-step", kind: "offline", v: 1, created: Date.now(), days: [d1, d2], files, ls});
-    await downloads.save({filename: `算数_オフライン_${d1.date.slice(5)}と${d2.date.slice(5)}.json`, data: new Blob([js], {type: "application/json"})});
+    const js = JSON.stringify({app: "sansu-step", kind: "offline", v: 1, created: Date.now(), days: [d1], files, ls});
+    await downloads.save({filename: `算数_オフライン_${d1.date.slice(5)}.json`, data: new Blob([js], {type: "application/json"})});
     dayMsg = `保存しました（${(js.length / 1048576).toFixed(1)}MB）。iPad のホーム画面の「算数オフライン」で、このファイルを読み込んでね。`; offPrev = null;
   } catch (e) { dayMsg = e && e.code === "declined" ? "保存をやめました。" : "作れませんでした: " + ((e && e.message) || e); }
   dayBusy = false; renderToday();
@@ -1066,10 +1063,10 @@ function renderToday() {
       : `<span class="note">写真で◎付けするには、ブラウザで claude.ai を開いてね。</span>`}
       <button class="ghost" id="redo">${day && day.date && day.date !== todayKey() ? "今日のプリントを新しく作る" : "今日の問題を決め直す"}</button>
       <button class="ghost" id="kinai" ${dayBusy ? "disabled" : ""} title="今日の分と重ならない1日分を先に作ってPDFに（機内などネットがないとき用）">機内用の1日分を作る（PDF）</button></div>`;
-    h += `<div class="row"><button class="ghost" id="offmk" ${dayBusy ? "disabled" : ""}>オフライン用ファイルを作る（2日分）</button>
+    h += `<div class="row"><button class="ghost" id="offmk" ${dayBusy ? "disabled" : ""}>オフライン用ファイルを作る（今日の1日分）</button>
       <label class="btn ghost">オフラインの記録を読み込む<input id="offrec" type="file" accept=".json,application/json" hidden></label></div>`;
-    if (offPrev) h += `<div class="sheet" style="padding:10px;margin:6px 0">${offListHtml(offPrev.d1, "1日目")}${offListHtml(offPrev.d2, "2日目")}
-      <div class="row"><button class="primary" id="offgo" ${dayBusy ? "disabled" : ""}>この2日分でファイルを作る</button><button class="ghost" id="offno">やめる</button></div></div>`;
+    if (offPrev) h += `<div class="sheet" style="padding:10px;margin:6px 0">${offListHtml(offPrev.d1, "今日のプリント")}
+      <div class="row"><button class="primary" id="offgo" ${dayBusy ? "disabled" : ""}>この1日分でファイルを作る</button><button class="ghost" id="offno">やめる</button></div></div>`;
     if (offRecs) { const c = offRecCount(offRecs); h += `<div class="sheet" style="padding:10px;margin:6px 0"><p>オフラインの記録：足す記録 ${c.add} 件（◎${c.ok}・×${c.add - c.ok}）。今の記録は消しません（機内でその日に付け直した分は、その日の結果を直します）。</p>
       <div class="row"><button class="primary" id="offadd">足す</button><button class="ghost" id="offaddno">やめる</button></div></div>`; }
     h += timesHtml(es);
